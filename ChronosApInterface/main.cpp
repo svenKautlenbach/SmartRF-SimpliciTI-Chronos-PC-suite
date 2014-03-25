@@ -1,25 +1,31 @@
 
 #include <Windows.h>
 
+#include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <exception>
 #include <fstream>
+#include <functional>
 #include <iostream>
-#include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "simpliciti.h"
 
 namespace
 {
 	std::vector<std::string> parameters;
+	std::ofstream outputFile;
 	DWORD baudrate = 115200;
 }
 
 static void fillParameters(int argc, char* argv[]);
-static HANDLE createCOMHandle(const std::string& portName);
+static HANDLE createComHandle(const std::string& portName);
 static std::string bufferToHex(const std::vector<uint8_t>& buffer);
+static void writePacketToFile(const std::vector<uint8_t>& packet);
 
 int main(int argc, char* argv[])
 {
@@ -30,33 +36,47 @@ int main(int argc, char* argv[])
 
 	fillParameters(argc, argv);
 
-	std::ofstream outputFile("ap output.txt", std::ios::trunc);
+	auto comHandle = createComHandle(parameters.at(0));
+
+	if (comHandle == nullptr)
+	{
+		std::cout << "COM handle creation was not succesful for: " << parameters.at(0) << ". Exiting..." << std::endl;
+		return -1;
+	}
+
+	outputFile.open("ap output.txt", std::ios::trunc);
 	if (!outputFile.is_open())
 	{
 		std::cout << "Could not open the output file. Exiting..." << std::endl;
 		return -1;
 	}
-
-	auto comHandle = createCOMHandle(parameters.at(0));
-
-	if (comHandle == nullptr)
-	{
-		std::cout << "COM handle creation was not succesful. Exiting..." << std::endl;
-		return -1;
-	}
 	
-	std::vector<uint8_t> sendBuffer(100);
-	std::vector<uint8_t> receiveBuffer(1000);
+	try
+	{
+		SimpliciTi simplicitiParser(comHandle, writePacketToFile);
+		simplicitiParser.startAccessPoint();
 
-	DWORD bytesSent;
-	DWORD bytesRead;
-	sendBuffer[0] = 0xFF; sendBuffer[1] = 0x07; sendBuffer[2] = 0x03;
-	WriteFile(comHandle, sendBuffer.data(), 3, &bytesSent, nullptr);
-	ReadFile(comHandle, receiveBuffer.data(), 3, &bytesRead, nullptr);
+		int lastCharFromConsole = 0;
+		while (lastCharFromConsole != 'x')
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-	outputFile << "Tere!" << std::endl;
-	outputFile << bufferToHex(std::vector<uint8_t>(receiveBuffer.begin(), receiveBuffer.begin() + 3)) << std::endl;
+			lastCharFromConsole = getc(stdin);
 
+		}
+		// While not entered x keep looping...
+	}
+	catch (const std::exception& e)
+	{
+		std::cout << "Exception caught while running SimpliciTI parser." << std::endl;
+		std::cout << e.what() << std::endl;
+	}
+	catch (...)
+	{
+		std::cout << "Unknown exception occured. Exiting..." << std::endl;
+	}
+
+	CloseHandle(comHandle);
 	outputFile.close();
 
 	return 0;
@@ -68,10 +88,9 @@ static void fillParameters(int argc, char* argv[])
 		parameters.push_back(std::string(argv[i]));
 }
 
-static HANDLE createCOMHandle(const std::string& portName)
+static HANDLE createComHandle(const std::string& portName)
 {
-	auto tere = LPCSTR(portName.c_str());
-	HANDLE comHandle = CreateFile(tere,
+	HANDLE comHandle = CreateFile(LPCSTR(portName.c_str()),
 										(GENERIC_READ | GENERIC_WRITE), 0, 0,
 										OPEN_EXISTING, 0, 0);
 
@@ -124,4 +143,18 @@ static std::string bufferToHex(const std::vector<uint8_t>& buffer)
 		stringBuffer << (uint32_t)aByte << " ";
 
 	return stringBuffer.str();
+}
+
+static void writePacketToFile(const std::vector<uint8_t>& packet)
+{
+	auto packetAsHex = bufferToHex(packet);
+
+	auto timeNow = std::time(nullptr);
+	auto timeNowTm = std::localtime(&timeNow);
+
+	std::string timeAsString(30, 0);
+	auto stringLength = std::strftime(const_cast<char*>(timeAsString.data()), timeAsString.capacity(), "%H:%M:%S", timeNowTm);
+	timeAsString.resize(stringLength);
+
+	outputFile << timeAsString << ", " << packet.size() << " bytes, " << packetAsHex << std::endl;
 }
