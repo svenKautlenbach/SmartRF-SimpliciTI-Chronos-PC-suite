@@ -29,6 +29,7 @@
 
 namespace
 {
+	size_t s_bytesReceived = 0;
 	std::vector<uint8_t> startSimpliciTiCommand = {USB_PACKET_START_BYTE, BM_START_SIMPLICITI, 0x03};
 	std::vector<uint8_t> stopSimpliciTiCommand = {USB_PACKET_START_BYTE, BM_STOP_SIMPLICITI, 0x03};
 	std::vector<uint8_t> startSimpliciTiCommandResponse = {USB_PACKET_START_BYTE, HW_NO_ERROR, 0x03};
@@ -61,9 +62,9 @@ void SimpliciTi::startAccessPoint()
 	m_parseTask = std::thread([&]{
 									while (!m_stopParsing)
 									{
-										std::this_thread::sleep_for(std::chrono::milliseconds(5));
+										std::this_thread::sleep_for(std::chrono::milliseconds(1));
 										parseAndLogPackets();
-										std::cout << "\rBuffer fullness: " << (m_comBuffer.size() / m_comBuffer.capacity()) * 100 << "%.";
+										std::cout << "\rBytes received: " << s_bytesReceived;
 									}
 								  });
 }
@@ -122,6 +123,8 @@ void SimpliciTi::readData(size_t dataLength)
 		bytesReadTotal += bytesRead;
 		m_comBuffer.push_back(aByte);
 	}
+
+	s_bytesReceived += bytesReadTotal;
 }
 
 // The algorithm here searches for the USB packet header and extracts the length. If there are communication

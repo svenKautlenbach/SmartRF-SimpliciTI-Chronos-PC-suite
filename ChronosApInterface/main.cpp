@@ -44,12 +44,22 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	outputFile.open("ap output.txt", std::ios::trunc);
+	auto timeNow = std::time(nullptr);
+	auto timeNowTm = std::localtime(&timeNow);
+
+	std::string timeAsString(30, 0);
+	auto stringLength = std::strftime(const_cast<char*>(timeAsString.data()), timeAsString.capacity(), "%H_%M_%S", timeNowTm);
+	timeAsString.resize(stringLength);
+	auto fileName = timeAsString + std::string(" AP output.txt");
+
+	outputFile.open(fileName, std::ios::trunc);
 	if (!outputFile.is_open())
 	{
 		std::cout << "Could not open the output file. Exiting..." << std::endl;
 		return -1;
 	}
+
+	outputFile << "Start" << std::endl;
 	
 	try
 	{
