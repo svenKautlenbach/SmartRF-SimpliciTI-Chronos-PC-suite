@@ -17,7 +17,7 @@
 * USB RF Access Point USB Serial protocol:
 * First byte - 0xFF
 * Second byte - Command (for example BM_START_SIMPLICITI is 0x07)
-* Third byte - packet length (minimum length is 3, maximum length is 32)
+* Third byte - packet length (minimum length is 3)
 * ACK packet is sent as original packet received with modified command byte - HW_NO_ERROR (0x06)
 */
 
@@ -30,9 +30,11 @@
 namespace
 {
 	size_t s_bytesReceived = 0;
+	size_t s_packetsReceived = 0;
 	std::vector<uint8_t> startSimpliciTiCommand = {USB_PACKET_START_BYTE, BM_START_SIMPLICITI, 0x03};
 	std::vector<uint8_t> stopSimpliciTiCommand = {USB_PACKET_START_BYTE, BM_STOP_SIMPLICITI, 0x03};
 	std::vector<uint8_t> startSimpliciTiCommandResponse = {USB_PACKET_START_BYTE, HW_NO_ERROR, 0x03};
+	auto stopSimpliciTiCommandResponse = startSimpliciTiCommandResponse;
 	std::vector<uint8_t> usbPacketStartSequence = {USB_PACKET_START_BYTE, HW_NO_ERROR};
 }
 
@@ -44,7 +46,7 @@ SimpliciTi::SimpliciTi(HANDLE comHandle, const std::function<void(std::vector<ui
 	m_comHandle = comHandle;
 
 	// 1000 bytes for the COM buffer.
-	m_comBuffer.reserve(1000);
+	m_comBuffer.reserve(10000);
 }
 
 void SimpliciTi::startAccessPoint()
@@ -62,9 +64,9 @@ void SimpliciTi::startAccessPoint()
 	m_parseTask = std::thread([&]{
 									while (!m_stopParsing)
 									{
-										std::this_thread::sleep_for(std::chrono::milliseconds(1));
+										//std::this_thread::sleep_for(std::chrono::milliseconds(1));
 										parseAndLogPackets();
-										std::cout << "\rBytes received: " << s_bytesReceived;
+										std::cout << "\rPackets received: " << s_packetsReceived << ". In total " << s_bytesReceived << " bytes.";
 									}
 								  });
 }
@@ -73,10 +75,24 @@ void SimpliciTi::stopAccessPoint()
 {
 	m_stopParsing = true;
 
+	if (m_parseTask.joinable())
+		m_parseTask.join();
+
+	std::cout << "Stopping..." << std::endl;
+
+	FlushFileBuffers(m_comHandle);
+
+	m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.end());
+
 	// We do no even care of the response anymore...
 	writeCommand(stopSimpliciTiCommand);
 
-	FlushFileBuffers(m_comHandle);
+	std::this_thread::sleep_for(std::chrono::seconds(1));
+
+	readData(stopSimpliciTiCommandResponse.size());
+
+	if (m_comBuffer != stopSimpliciTiCommandResponse)
+		std::cout << "Stopping the access point was not succesful, please restart it manually..." << std::endl;
 }
 
 void SimpliciTi::writeCommand(const std::vector<uint8_t>& command)
@@ -133,51 +149,59 @@ void SimpliciTi::readData(size_t dataLength)
 // here, but since nothing besides m_parseTask uses it, it is safe for now.
 void SimpliciTi::parseAndLogPackets()
 {
-	readData(100);
+	readData(50);
 
-	// We do not know the new packet length and we must have atleast the complete header.
-	if (m_currentPacketSize == 0)
+	while (m_comBuffer.size() > 0)
 	{
-		// Not enough data to find the header though.
-		if (m_comBuffer.size() < USB_PACKET_HEADER_LENGTH)
+		// We do not know the new packet length and we must have atleast the complete header.
+		if (m_currentPacketSize == 0)
+		{
+			// Not enough data to find the header though.
+			if (m_comBuffer.size() < USB_PACKET_HEADER_LENGTH)
+			{
+				return;
+			}
+
+			// Searching for 0xFF, 0x06.
+			auto newPacketBeginning = std::search(m_comBuffer.begin(), m_comBuffer.end(), usbPacketStartSequence.begin(), usbPacketStartSequence.end());
+
+			// Complete packet header not found.
+			if (newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX >= m_comBuffer.end())
+			{
+				std::cout << "Packet start not found, discarding " << m_comBuffer.size() << " bytes" << std::endl;
+				m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.end());
+
+				return;
+			}
+
+			// If this is somehow still zero, then next time new packet will be searched for anyway.
+			m_currentPacketSize = *(newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX) - USB_PACKET_HEADER_LENGTH;
+
+			if (((newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comBuffer.begin()) > USB_PACKET_HEADER_LENGTH)
+				std::cout << "New packet header found, but discarding more bytes (" << (newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comBuffer.begin()
+				<< ")." << std::endl;
+
+			// Erase all the not useful data and the header so later we could just cut the usable data out.
+			m_comBuffer.erase(m_comBuffer.begin(), newPacketBeginning + USB_PACKET_HEADER_LENGTH);
+		}
+
+		if (m_comBuffer.size() < m_currentPacketSize)
 		{
 			return;
 		}
 
-		// Searching for 0xFF, 0x06.
-		auto newPacketBeginning = std::search(m_comBuffer.begin(), m_comBuffer.end(), usbPacketStartSequence.begin(), usbPacketStartSequence.end());
+		// Lets extract the packet data out.
+		m_fileLogCallback(std::vector<uint8_t>(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize));
+		s_packetsReceived++;
 
-		// Complete packet header not found.
-		if (newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX >= m_comBuffer.end())
-		{
-			return;
-		}
-		
-		// If this is somehow still zero, then next time new packet will be searched for anyway.
-		m_currentPacketSize = *(newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX) - USB_PACKET_HEADER_LENGTH;
+		m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize);
 
-		// Erase all the not useful data and the header so later we could just cut the usable data out.
-		m_comBuffer.erase(m_comBuffer.begin(), newPacketBeginning + USB_PACKET_HEADER_LENGTH);
+		m_currentPacketSize = 0;
 	}
-
-	if (m_comBuffer.size() < m_currentPacketSize)
-	{
-		return;
-	}
-
-	// Lets extract the packet data out.
-	m_fileLogCallback(std::vector<uint8_t>(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize));
-
-	m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize);
-
-	m_currentPacketSize = 0;
 }
 
 SimpliciTi::~SimpliciTi()
 {
 	stopAccessPoint();
-
-	if (m_parseTask.joinable())
-		m_parseTask.join();
 }
 
