@@ -46,7 +46,8 @@ int main(int argc, char* argv[])
 
 	fillParameters(argc, argv);
 
-	auto comHandle = createComHandle(parameters.at(0));
+	std::string comName = "\\\\.\\COM" + parameters.at(0);
+	auto comHandle = createComHandle(comName);
 
 	if (parameters.size() > 1)
 	{
