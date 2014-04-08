@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <exception>
 #include <iostream>
 
@@ -46,20 +47,51 @@ SimpliciTi::SimpliciTi(HANDLE comHandle, const std::function<void(std::vector<ui
 	m_comHandle = comHandle;
 
 	// 1000 bytes for the COM buffer.
-	m_comBuffer.reserve(10000);
+	m_comDataBuffer.reserve(10000);
 }
 
 void SimpliciTi::startAccessPoint()
 {
 	FlushFileBuffers(m_comHandle);
-	writeCommand(startSimpliciTiCommand);
-	while (m_comBuffer.size() < startSimpliciTiCommandResponse.size())
-		readData(startSimpliciTiCommandResponse.size() - m_comBuffer.size());
 
-	if (!(m_comBuffer == startSimpliciTiCommandResponse))
+/*	std::vector<uint8_t> bullshit1(4);
+	bullshit1.push_back(0xFF);
+	bullshit1.push_back(0x55);
+	bullshit1.push_back(0x03);
+
+	writeCommand(bullshit1);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	readData(true, 3);
+
+	writeCommand(bullshit1);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	readData(true, 3);
+
+	writeCommand(bullshit1);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	readData(true, 3);*/
+
+/*	std::vector<uint8_t> startCommandWithTime(startSimpliciTiCommand.begin(), startSimpliciTiCommand.end());
+	startCommandWithTime[USB_PACKET_LENGTH_BYTE_INDEX] = 7;
+	auto timeT = std::time(nullptr);
+
+	// Lets imagine some delay value here.
+	timeT += 2;
+	startCommandWithTime.push_back(static_cast<uint8_t>(timeT & 0x000000FF));
+	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0x0000FF00) >> 8));
+	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0x00FF0000) >> 16));
+	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0xFF000000) >> 24));
+*/
+	m_comCommandBuffer.erase(m_comCommandBuffer.begin(), m_comCommandBuffer.end());
+	m_comCommandBuffer.reserve(startSimpliciTiCommandResponse.size());
+	writeCommand(startSimpliciTiCommand);
+	while (m_comCommandBuffer.size() < startSimpliciTiCommand.size())
+		readData(true, startSimpliciTiCommand.size() - m_comCommandBuffer.size());
+
+	if (m_comCommandBuffer != startSimpliciTiCommandResponse)
 		throw std::exception("Starting access point failed. Check the device.");
 
-	m_comBuffer.resize(0);
+	m_comCommandBuffer.resize(0);
 
 	m_parseTask = std::thread([&]{
 									while (!m_stopParsing)
@@ -82,16 +114,16 @@ void SimpliciTi::stopAccessPoint()
 
 	FlushFileBuffers(m_comHandle);
 
-	m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.end());
-
 	// We do no even care of the response anymore...
 	writeCommand(stopSimpliciTiCommand);
 
 	std::this_thread::sleep_for(std::chrono::seconds(1));
 
-	readData(stopSimpliciTiCommandResponse.size());
+	m_comCommandBuffer.erase(m_comCommandBuffer.begin(), m_comCommandBuffer.end());
+	m_comCommandBuffer.reserve(stopSimpliciTiCommandResponse.size());
+	readData(true, stopSimpliciTiCommandResponse.size());
 
-	if (m_comBuffer != stopSimpliciTiCommandResponse)
+	if (m_comCommandBuffer != stopSimpliciTiCommandResponse)
 		std::cout << "Stopping the access point was not succesful, please restart it manually..." << std::endl;
 }
 
@@ -115,10 +147,12 @@ void SimpliciTi::writeCommand(const std::vector<uint8_t>& command)
 	}
 }
 
-void SimpliciTi::readData(size_t dataLength)
+void SimpliciTi::readData(bool isCommand, size_t dataLength)
 {
+	std::vector<uint8_t>& receiveBuffer = (isCommand ? m_comCommandBuffer : m_comDataBuffer);
+
 	// If there is no room for data, then lets read less.
-	auto freeBytes = m_comBuffer.capacity() - m_comBuffer.size();
+	auto freeBytes = receiveBuffer.capacity() - receiveBuffer.size();
 
 	// Unfortunately we cannot set the size of the vector directly, so we read byte by byte.
 	DWORD bytesReadTotal = 0;
@@ -132,12 +166,12 @@ void SimpliciTi::readData(size_t dataLength)
 		if (!success)
 			throw std::exception("Reading the COM port was not succesful. Check the device manager or the device.");
 
-		// Right no could not get more, so break here, lets not block.
+		// Right now could not get more, so break here, lets not block.
 		if (bytesRead == 0)
 			break;
 
 		bytesReadTotal += bytesRead;
-		m_comBuffer.push_back(aByte);
+		receiveBuffer.push_back(aByte);
 	}
 
 	s_bytesReceived += bytesReadTotal;
@@ -149,27 +183,27 @@ void SimpliciTi::readData(size_t dataLength)
 // here, but since nothing besides m_parseTask uses it, it is safe for now.
 void SimpliciTi::parseAndLogPackets()
 {
-	readData(50);
+	readData(false, 50);
 
-	while (m_comBuffer.size() > 0)
+	while (m_comDataBuffer.size() > 0)
 	{
 		// We do not know the new packet length and we must have atleast the complete header.
 		if (m_currentPacketSize == 0)
 		{
 			// Not enough data to find the header though.
-			if (m_comBuffer.size() < USB_PACKET_HEADER_LENGTH)
+			if (m_comDataBuffer.size() < USB_PACKET_HEADER_LENGTH)
 			{
 				return;
 			}
 
 			// Searching for 0xFF, 0x06.
-			auto newPacketBeginning = std::search(m_comBuffer.begin(), m_comBuffer.end(), usbPacketStartSequence.begin(), usbPacketStartSequence.end());
+			auto newPacketBeginning = std::search(m_comDataBuffer.begin(), m_comDataBuffer.end(), usbPacketStartSequence.begin(), usbPacketStartSequence.end());
 
 			// Complete packet header not found.
-			if (newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX >= m_comBuffer.end())
+			if (newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX >= m_comDataBuffer.end())
 			{
-				std::cout << "Packet start not found, discarding " << m_comBuffer.size() << " bytes" << std::endl;
-				m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.end());
+				std::cout << "Packet start not found, discarding " << m_comDataBuffer.size() << " bytes" << std::endl;
+				m_comDataBuffer.erase(m_comDataBuffer.begin(), m_comDataBuffer.end());
 
 				return;
 			}
@@ -177,24 +211,24 @@ void SimpliciTi::parseAndLogPackets()
 			// If this is somehow still zero, then next time new packet will be searched for anyway.
 			m_currentPacketSize = *(newPacketBeginning + USB_PACKET_LENGTH_BYTE_INDEX) - USB_PACKET_HEADER_LENGTH;
 
-			if (((newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comBuffer.begin()) > USB_PACKET_HEADER_LENGTH)
-				std::cout << "New packet header found, but discarding more bytes (" << (newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comBuffer.begin()
+			if (((newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comDataBuffer.begin()) > USB_PACKET_HEADER_LENGTH)
+				std::cout << "New packet header found, but discarding more bytes (" << (newPacketBeginning + USB_PACKET_HEADER_LENGTH) - m_comDataBuffer.begin()
 				<< ")." << std::endl;
 
 			// Erase all the not useful data and the header so later we could just cut the usable data out.
-			m_comBuffer.erase(m_comBuffer.begin(), newPacketBeginning + USB_PACKET_HEADER_LENGTH);
+			m_comDataBuffer.erase(m_comDataBuffer.begin(), newPacketBeginning + USB_PACKET_HEADER_LENGTH);
 		}
 
-		if (m_comBuffer.size() < m_currentPacketSize)
+		if (m_comDataBuffer.size() < m_currentPacketSize)
 		{
 			return;
 		}
 
 		// Lets extract the packet data out.
-		m_fileLogCallback(std::vector<uint8_t>(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize));
+		m_fileLogCallback(std::vector<uint8_t>(m_comDataBuffer.begin(), m_comDataBuffer.begin() + m_currentPacketSize));
 		s_packetsReceived++;
 
-		m_comBuffer.erase(m_comBuffer.begin(), m_comBuffer.begin() + m_currentPacketSize);
+		m_comDataBuffer.erase(m_comDataBuffer.begin(), m_comDataBuffer.begin() + m_currentPacketSize);
 
 		m_currentPacketSize = 0;
 	}

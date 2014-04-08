@@ -23,7 +23,7 @@ public:
 private:
 
 	void writeCommand(const std::vector<uint8_t>& command);
-	void readData(size_t dataLength = 100);
+	void readData(bool isCommand, size_t dataLength = 100);
 
 	// Used together in conjuction. Reads the COM port at the background, parses packets
 	// ,fills the buffers and logs.
@@ -34,7 +34,8 @@ private:
 	HANDLE m_comHandle;
 
 	size_t m_currentPacketSize = 0;
-	std::vector<uint8_t> m_comBuffer;
+	std::vector<uint8_t> m_comDataBuffer;
+	std::vector<uint8_t> m_comCommandBuffer;
 
 	std::function<void(std::vector<uint8_t>)> m_fileLogCallback;
 };
