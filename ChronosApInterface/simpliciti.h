@@ -12,7 +12,7 @@ class SimpliciTi
 {
 public:
 	// COM port handle must be created and set up previously.
-	SimpliciTi(HANDLE comHandlem, const std::function<void(std::vector<uint8_t>)>& fileLogCallback);
+	SimpliciTi(const std::string& comPortName, const std::function<void(std::vector<uint8_t>)>& fileLogCallback);
 
 	// Start must be called before any other operations are called.
 	void startAccessPoint();
@@ -30,8 +30,7 @@ private:
 	void parseAndLogPackets();
 	std::thread m_parseTask;
 	std::atomic<bool> m_stopParsing = false;
-
-	HANDLE m_comHandle;
+	bool m_accessPointOn = false;
 
 	size_t m_currentPacketSize = 0;
 	std::vector<uint8_t> m_comDataBuffer;

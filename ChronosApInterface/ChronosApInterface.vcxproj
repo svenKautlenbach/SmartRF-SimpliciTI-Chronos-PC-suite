@@ -11,10 +11,12 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BM_Driver.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="simpliciti.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="BM_Driver.h" />
     <ClInclude Include="simpliciti.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

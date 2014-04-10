@@ -33,7 +33,6 @@ namespace
 }
 
 static void fillParameters(int argc, char* argv[]);
-static HANDLE createComHandle(const std::string& portName);
 static std::string bufferToHex(const std::vector<uint8_t>& buffer);
 static void writePacketToFile(const std::vector<uint8_t>& packet);
 
@@ -45,9 +44,6 @@ int main(int argc, char* argv[])
 	}
 
 	fillParameters(argc, argv);
-
-	std::string comName = "\\\\.\\COM" + parameters.at(0);
-	auto comHandle = createComHandle(comName);
 
 	if (parameters.size() > 1)
 	{
@@ -67,13 +63,6 @@ int main(int argc, char* argv[])
 		}
 	}
 
-
-	if (comHandle == nullptr)
-	{
-		std::cout << "COM handle creation was not succesful for: " << parameters.at(0) << ". Exiting..." << std::endl;
-		return -1;
-	}
-
 	auto timeNow = std::time(nullptr);
 	auto timeNowTm = std::localtime(&timeNow);
 
@@ -91,7 +80,8 @@ int main(int argc, char* argv[])
 	
 	try
 	{
-		SimpliciTi simplicitiParser(comHandle, writePacketToFile);
+		std::string comName = "\\\\.\\COM" + parameters.at(0);
+		SimpliciTi simplicitiParser(comName, writePacketToFile);
 		simplicitiParser.startAccessPoint();
 
 		auto timeNow2 = std::time(nullptr);
@@ -109,18 +99,20 @@ int main(int argc, char* argv[])
 			lastCharFromConsole = getc(stdin);
 		}
 		// While not entered x keep looping...
+
+		simplicitiParser.stopAccessPoint();
 	}
 	catch (const std::exception& e)
 	{
 		std::cout << "Exception caught while running SimpliciTI parser." << std::endl;
 		std::cout << e.what() << std::endl;
+		std::cout << "GetLastError():" << GetLastError() << std::endl;
 	}
 	catch (...)
 	{
 		std::cout << "Unknown exception occured. Exiting..." << std::endl;
 	}
 
-	CloseHandle(comHandle);
 	outputFile.close();
 
 	return 0;
@@ -130,53 +122,6 @@ static void fillParameters(int argc, char* argv[])
 {
 	for (uint32_t i = 1; i < (uint32_t)argc; i++)
 		parameters.push_back(std::string(argv[i]));
-}
-
-static HANDLE createComHandle(const std::string& portName)
-{
-	HANDLE comHandle = CreateFile(LPCSTR(portName.c_str()),
-										(GENERIC_READ | GENERIC_WRITE), 0, 0,
-										OPEN_EXISTING, 0, 0);
-
-	if (comHandle == INVALID_HANDLE_VALUE)
-	{
-		std::cout << "Could not create COM port handle: " << GetLastError() << std::endl;
-		return nullptr;
-	}
-
-	DCB dcbSerialParameters = {0};
-	dcbSerialParameters.DCBlength = sizeof(dcbSerialParameters);
-	if (!GetCommState(comHandle, &dcbSerialParameters))
-	{
-		std::cout << "Getting COM port state failed: " << GetLastError() << std::endl;
-		return nullptr;
-	}
-
-	dcbSerialParameters.BaudRate = baudrate;
-	dcbSerialParameters.ByteSize = 8;
-	dcbSerialParameters.StopBits = ONESTOPBIT;
-	dcbSerialParameters.Parity = NOPARITY;
-
-	if (!SetCommState(comHandle, &dcbSerialParameters))
-	{
-		std::cout << "Setting COM port parameters failed: " << GetLastError() << std::endl;
-		return nullptr;
-	} 
-
-	COMMTIMEOUTS timeouts = {0};
-	timeouts.ReadIntervalTimeout = 50 * 20;
-	timeouts.ReadTotalTimeoutConstant = 50 * 20;
-	timeouts.ReadTotalTimeoutMultiplier = 10 * 20;
-	timeouts.WriteTotalTimeoutConstant = 50 * 20;
-	timeouts.WriteTotalTimeoutMultiplier = 10 * 20;
-
-	if (!SetCommTimeouts(comHandle, &timeouts))
-	{
-		std::cout << "Setting COM port timeouts failed: " << GetLastError() << std::endl;
-		return nullptr;
-	}
-
-	return comHandle;
 }
 
 static std::string bufferToHex(const std::vector<uint8_t>& buffer)

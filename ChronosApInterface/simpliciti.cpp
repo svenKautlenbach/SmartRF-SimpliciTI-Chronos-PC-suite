@@ -1,10 +1,13 @@
 #include "simpliciti.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <ctime>
 #include <exception>
 #include <iostream>
+
+#include "BM_Driver.h"
 
 #define USB_PACKET_HEADER_LENGTH		0x03
 #define USB_PACKET_START_BYTE			0xFF
@@ -39,59 +42,32 @@ namespace
 	std::vector<uint8_t> usbPacketStartSequence = {USB_PACKET_START_BYTE, HW_NO_ERROR};
 }
 
-SimpliciTi::SimpliciTi(HANDLE comHandle, const std::function<void(std::vector<uint8_t>)>& fileLogCallback) : m_fileLogCallback(fileLogCallback)
+SimpliciTi::SimpliciTi(const std::string& comPortName, const std::function<void(std::vector<uint8_t>)>& fileLogCallback) : m_fileLogCallback(fileLogCallback)
 {
-	if (comHandle == INVALID_HANDLE_VALUE || comHandle == nullptr)
+	if (!OpenCOM(0, const_cast<char*>(comPortName.c_str())))
 		throw std::exception("Invalid handle supplied to the SimpliciTI parser.");
-
-	m_comHandle = comHandle;
 
 	// 1000 bytes for the COM buffer.
 	m_comDataBuffer.reserve(10000);
+	m_comCommandBuffer.reserve(100);
 }
 
 void SimpliciTi::startAccessPoint()
 {
-	FlushFileBuffers(m_comHandle);
+	FlushCOM(0);
 
-/*	std::vector<uint8_t> bullshit1(4);
-	bullshit1.push_back(0xFF);
-	bullshit1.push_back(0x55);
-	bullshit1.push_back(0x03);
-
-	writeCommand(bullshit1);
-	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	readData(true, 3);
-
-	writeCommand(bullshit1);
-	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	readData(true, 3);
-
-	writeCommand(bullshit1);
-	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-	readData(true, 3);*/
-
-/*	std::vector<uint8_t> startCommandWithTime(startSimpliciTiCommand.begin(), startSimpliciTiCommand.end());
-	startCommandWithTime[USB_PACKET_LENGTH_BYTE_INDEX] = 7;
-	auto timeT = std::time(nullptr);
-
-	// Lets imagine some delay value here.
-	timeT += 2;
-	startCommandWithTime.push_back(static_cast<uint8_t>(timeT & 0x000000FF));
-	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0x0000FF00) >> 8));
-	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0x00FF0000) >> 16));
-	startCommandWithTime.push_back(static_cast<uint8_t>((timeT & 0xFF000000) >> 24));
-*/
-	m_comCommandBuffer.erase(m_comCommandBuffer.begin(), m_comCommandBuffer.end());
-	m_comCommandBuffer.reserve(startSimpliciTiCommandResponse.size());
 	writeCommand(startSimpliciTiCommand);
-	while (m_comCommandBuffer.size() < startSimpliciTiCommand.size())
-		readData(true, startSimpliciTiCommand.size() - m_comCommandBuffer.size());
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+	m_comCommandBuffer.resize(0);
+	readData(true, startSimpliciTiCommandResponse.size());
 
 	if (m_comCommandBuffer != startSimpliciTiCommandResponse)
 		throw std::exception("Starting access point failed. Check the device.");
 
-	m_comCommandBuffer.resize(0);
+	m_accessPointOn = true;
+	m_stopParsing = false;
 
 	m_parseTask = std::thread([&]{
 									while (!m_stopParsing)
@@ -105,76 +81,56 @@ void SimpliciTi::startAccessPoint()
 
 void SimpliciTi::stopAccessPoint()
 {
+	if (m_accessPointOn == false)
+		return;
+
 	m_stopParsing = true;
+	m_accessPointOn = false;
 
 	if (m_parseTask.joinable())
 		m_parseTask.join();
 
-	std::cout << "Stopping..." << std::endl;
+	std::cout << std::endl << "Stopping..." << std::endl;
 
-	FlushFileBuffers(m_comHandle);
+	FlushCOM(0);
 
 	// We do no even care of the response anymore...
 	writeCommand(stopSimpliciTiCommand);
 
-	std::this_thread::sleep_for(std::chrono::seconds(1));
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-	m_comCommandBuffer.erase(m_comCommandBuffer.begin(), m_comCommandBuffer.end());
-	m_comCommandBuffer.reserve(stopSimpliciTiCommandResponse.size());
+	m_comCommandBuffer.resize(0);
 	readData(true, stopSimpliciTiCommandResponse.size());
 
 	if (m_comCommandBuffer != stopSimpliciTiCommandResponse)
-		std::cout << "Stopping the access point was not succesful, please restart it manually..." << std::endl;
+		std::cout << "Stopping the access point did not return any message, please check if the led is still blinking..." << std::endl;
 }
 
 void SimpliciTi::writeCommand(const std::vector<uint8_t>& command)
 {
-	DWORD bytesSent = 0;
-	DWORD commandLength = command.size();
-
-	while (bytesSent < commandLength)
+	if (!WriteCOM(0, command.size(), const_cast<UCHAR*>(command.data())))
 	{
-		DWORD bytesSentSingleWrite = 0;
-		auto success = WriteFile(m_comHandle, startSimpliciTiCommand.data() + bytesSent, commandLength - bytesSent, &bytesSentSingleWrite, nullptr);
-
-		// Probably some error, so lets not stay looping.
-		if (bytesSentSingleWrite == 0 || !success)
-		{
-			throw std::exception("Writing to serial was unsuccesful.");
-		}
-
-		bytesSent += bytesSentSingleWrite;
+		throw std::exception("Failed to send command to the access point.");
 	}
 }
 
 void SimpliciTi::readData(bool isCommand, size_t dataLength)
 {
-	std::vector<uint8_t>& receiveBuffer = (isCommand ? m_comCommandBuffer : m_comDataBuffer);
+	std::array<uint8_t, 100> buffer;
+	std::vector<uint8_t>& destinationBuffer = (isCommand ? m_comCommandBuffer : m_comDataBuffer);
 
 	// If there is no room for data, then lets read less.
-	auto freeBytes = receiveBuffer.capacity() - receiveBuffer.size();
+	auto freeBytes = std::min(destinationBuffer.capacity() - destinationBuffer.size(), buffer.size());
+	size_t bufferSize = std::min(freeBytes, dataLength);
 
-	// Unfortunately we cannot set the size of the vector directly, so we read byte by byte.
-	DWORD bytesReadTotal = 0;
-	while (bytesReadTotal < std::min(freeBytes, dataLength))
+	size_t readBytes = ReadCOM(0, bufferSize, buffer.data());
+
+	for (size_t i = 0; i < readBytes; i++)
 	{
-		DWORD bytesRead = 0;
-		uint8_t aByte = 0;
-		auto success = ReadFile(m_comHandle, &aByte, 1, &bytesRead, nullptr);
-
-		// We do not care if we managed to read any data, because the I/O buffers can be empty.
-		if (!success)
-			throw std::exception("Reading the COM port was not succesful. Check the device manager or the device.");
-
-		// Right now could not get more, so break here, lets not block.
-		if (bytesRead == 0)
-			break;
-
-		bytesReadTotal += bytesRead;
-		receiveBuffer.push_back(aByte);
+		destinationBuffer.push_back(buffer[i]);
 	}
 
-	s_bytesReceived += bytesReadTotal;
+	s_bytesReceived += readBytes;
 }
 
 // The algorithm here searches for the USB packet header and extracts the length. If there are communication
@@ -237,5 +193,7 @@ void SimpliciTi::parseAndLogPackets()
 SimpliciTi::~SimpliciTi()
 {
 	stopAccessPoint();
+
+	CloseCOM(0);
 }
 

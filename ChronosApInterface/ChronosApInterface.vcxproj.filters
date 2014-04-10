@@ -21,9 +21,15 @@
     <ClCompile Include="simpliciti.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="BM_Driver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="simpliciti.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BM_Driver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
