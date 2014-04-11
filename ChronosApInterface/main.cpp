@@ -162,7 +162,7 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	timestamp |= ((0x000000FF & packet[3]) << 16);
 	timestamp |= ((0x000000FF & packet[4]) << 24);
 
-	auto timestampTm = std::gmtime(&timestamp);
+	auto timestampTm = std::localtime(&timestamp);
 	std::string timestampAsString(30, 0);
 	auto timestampLength = std::strftime(const_cast<char*>(timestampAsString.data()), timestampAsString.capacity(), "%c", timestampTm);
 	timestampAsString.resize(timestampLength);

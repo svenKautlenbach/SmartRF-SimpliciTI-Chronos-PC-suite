@@ -29,6 +29,9 @@
 #define BM_GET_SIMPLICITIDATA 0x08
 #define BM_STOP_SIMPLICITI 0x09
 
+#define SHM_SYNC_TIMESTAMP 0x51
+#define SHM_TOGGLE_LED 0x55
+
 #define HW_NO_ERROR 0x06
 
 namespace
@@ -55,6 +58,25 @@ SimpliciTi::SimpliciTi(const std::string& comPortName, const std::function<void(
 void SimpliciTi::startAccessPoint()
 {
 	FlushCOM(0);
+
+	auto timeT = std::time(nullptr);
+	timeT += 2; // Just some predictable delay;
+	std::vector<uint8_t> timestampSyncCommand = {USB_PACKET_START_BYTE,
+												SHM_SYNC_TIMESTAMP, 
+												0x07,
+												static_cast<uint8_t>(timeT & 0xFF),
+												static_cast<uint8_t>((timeT & 0xFF00) >> 8),
+												static_cast<uint8_t>((timeT & 0x00FF0000) >> 16), 
+												static_cast<uint8_t>((timeT & 0xFF000000) >> 24)};
+
+	writeCommand(timestampSyncCommand);
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	m_comCommandBuffer.resize(0);
+	readData(true, timestampSyncCommand.size());
+
+	timestampSyncCommand[1] = HW_NO_ERROR;
+	if (m_comCommandBuffer != timestampSyncCommand)
+		std::cout << "Could not set the sync timestamp. Expect bogus timestamps." << std::endl;
 
 	writeCommand(startSimpliciTiCommand);
 
