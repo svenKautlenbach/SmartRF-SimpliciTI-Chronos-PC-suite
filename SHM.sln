@@ -5,6 +5,8 @@ VisualStudioVersion = 12.0.21005.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ChronosApInterface", "ChronosApInterface\ChronosApInterface.vcxproj", "{A956B66F-6990-4082-994E-8611DEA77894}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PacketSnifferProcess", "PacketSnifferProcess\PacketSnifferProcess.vcxproj", "{7B3C90FD-ED79-4F10-916D-8604981D0879}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -15,6 +17,10 @@ Global
 		{A956B66F-6990-4082-994E-8611DEA77894}.Debug|Win32.Build.0 = Debug|Win32
 		{A956B66F-6990-4082-994E-8611DEA77894}.Release|Win32.ActiveCfg = Release|Win32
 		{A956B66F-6990-4082-994E-8611DEA77894}.Release|Win32.Build.0 = Release|Win32
+		{7B3C90FD-ED79-4F10-916D-8604981D0879}.Debug|Win32.ActiveCfg = Debug|Win32
+		{7B3C90FD-ED79-4F10-916D-8604981D0879}.Debug|Win32.Build.0 = Debug|Win32
+		{7B3C90FD-ED79-4F10-916D-8604981D0879}.Release|Win32.ActiveCfg = Release|Win32
+		{7B3C90FD-ED79-4F10-916D-8604981D0879}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
