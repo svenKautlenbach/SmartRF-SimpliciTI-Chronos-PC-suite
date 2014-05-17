@@ -90,6 +90,7 @@ int main(int argc, char* argv[])
 		auto stringLength = std::strftime(const_cast<char*>(timeAsString2.data()), timeAsString2.capacity(), "%c", timeNowTm2);
 		timeAsString2.resize(stringLength);
 		outputFile << "Start @ " << timeAsString2 << std::endl;
+		outputFile << "localTime,linkId,apCounter,sourceCounter,timestamp,packet,RSSI,LQI,FCS" << std::endl;
 
 		int lastCharFromConsole = 0;
 		while (lastCharFromConsole != 'x')
@@ -156,11 +157,19 @@ static std::string bufferToNumber(const std::vector<uint8_t>& buffer)
 
 static void writePacketToFile(const std::vector<uint8_t>& packet)
 {
+	uint32_t linkId = static_cast<uint32_t>(packet[0]);
+	uint16_t accessPointPacketCounter = 0;
+	accessPointPacketCounter |= (0x00FF & packet[1]);
+	accessPointPacketCounter |= ((0x00FF & packet[2]) << 8);
+	int32_t rssi = static_cast<int32_t>((int8_t)packet[3]);
+	uint32_t lqi = static_cast<uint32_t>(packet[4] & 0x7F);
+	bool fcsOk = ((packet[4] & 0x80) > 0 ? false : true);
+
 	time_t timestamp = 0;
-	timestamp |= (0x000000FF & packet[1]);
-	timestamp |= ((0x000000FF & packet[2]) << 8);
-	timestamp |= ((0x000000FF & packet[3]) << 16);
-	timestamp |= ((0x000000FF & packet[4]) << 24);
+	timestamp |= (0x000000FF & packet[5]);
+	timestamp |= ((0x000000FF & packet[6]) << 8);
+	timestamp |= ((0x000000FF & packet[7]) << 16);
+	timestamp |= ((0x000000FF & packet[8]) << 24);
 
 	auto timestampTm = std::localtime(&timestamp);
 	std::string timestampAsString(30, 0);
@@ -168,11 +177,17 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	timestampAsString.resize(timestampLength);
 
 	uint16_t milliseconds = 0;
-	milliseconds |= (0x00FF & packet[5]);
-	milliseconds |= ((0x00FF & packet[6]) << 8);
+	milliseconds |= (0x00FF & packet[9]);
+	milliseconds |= ((0x00FF & packet[10]) << 8);
+
+	uint32_t endDevicePacketCounter = 0;
+	endDevicePacketCounter |= (0x000000FF & packet[11]);
+	endDevicePacketCounter |= ((0x000000FF & packet[12]) << 8);
+	endDevicePacketCounter |= ((0x000000FF & packet[13]) << 16);
+	endDevicePacketCounter |= ((0x000000FF & packet[14]) << 24);
 
 	std::string formattedBlob;
-	auto packetBlob = std::vector<uint8_t>(packet.begin() + 7, packet.end());
+	auto packetBlob = std::vector<uint8_t>(packet.begin() + 15, packet.end());
 	switch (dataBlobFormat)
 	{
 	case blobFormat::ascii:
@@ -192,10 +207,10 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	auto timeNow = std::time(nullptr);
 	auto timeNowTm = std::localtime(&timeNow);
 
-	std::string timeAsString(30, 0);
-	auto stringLength = std::strftime(const_cast<char*>(timeAsString.data()), timeAsString.capacity(), "%H:%M:%S", timeNowTm);
-	timeAsString.resize(stringLength);
+	std::string localTimeAsString(30, 0);
+	auto stringLength = std::strftime(const_cast<char*>(localTimeAsString.data()), localTimeAsString.capacity(), "%H:%M:%S", timeNowTm);
+	localTimeAsString.resize(stringLength);
 
-	outputFile << timeAsString << ", " << packet.size() << " bytes," << " link " << static_cast<uint32_t>(packet[0]) << ", " << timestampAsString
-		<< ";" << milliseconds << ", " << formattedBlob << std::endl;
+	outputFile << localTimeAsString << "," << linkId << "," << accessPointPacketCounter << "," << endDevicePacketCounter << ",\"" << timestampAsString
+		<< ";" << milliseconds << "\",\"" << formattedBlob << "\"," << rssi << "," << lqi << "," << (fcsOk ? "OK" : "ERROR") << std::endl;
 }

@@ -161,7 +161,7 @@ void SimpliciTi::readData(bool isCommand, size_t dataLength)
 // here, but since nothing besides m_parseTask uses it, it is safe for now.
 void SimpliciTi::parseAndLogPackets()
 {
-	readData(false, 50);
+	readData(false, 100);
 
 	while (m_comDataBuffer.size() > 0)
 	{

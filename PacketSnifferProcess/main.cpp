@@ -55,7 +55,7 @@ int main(char argc, char* argv[])
 	std::cout << "File offset byte count: " << byteError << "." << std::endl;
 
 	std::string outputFileName = parameters.at(0);
-	outputFileName.replace(outputFileName.end() - 3, outputFileName.end(), "csv");
+	outputFileName.replace(outputFileName.end() - 3, outputFileName.end(), "txt");
 	std::ofstream outputFile;
 	outputFile.open(outputFileName);
 
