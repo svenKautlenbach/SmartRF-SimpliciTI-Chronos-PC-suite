@@ -94,9 +94,7 @@ void SimpliciTi::startAccessPoint()
 	m_parseTask = std::thread([&]{
 									while (!m_stopParsing)
 									{
-										//std::this_thread::sleep_for(std::chrono::milliseconds(1));
 										parseAndLogPackets();
-										std::cout << "\rPackets received: " << s_packetsReceived << ". In total " << s_bytesReceived << " bytes.";
 									}
 								  });
 }

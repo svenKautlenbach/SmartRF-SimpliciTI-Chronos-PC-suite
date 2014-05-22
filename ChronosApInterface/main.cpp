@@ -1,6 +1,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
@@ -9,6 +10,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -21,6 +23,7 @@ namespace
 	std::vector<std::string> parameters;
 	std::ofstream outputFile;
 	DWORD baudrate = 115200;
+	std::map<uint32_t, std::string> s_connectedDevicesLog;
 
 	enum class blobFormat
 	{
@@ -90,7 +93,7 @@ int main(int argc, char* argv[])
 		auto stringLength = std::strftime(const_cast<char*>(timeAsString2.data()), timeAsString2.capacity(), "%c", timeNowTm2);
 		timeAsString2.resize(stringLength);
 		outputFile << "Start @ " << timeAsString2 << std::endl;
-		outputFile << "localTime,linkId,apCounter,sourceCounter,timestamp,packet,RSSI,LQI,FCS" << std::endl;
+		outputFile << "localTime,linkId,apCounter,sourceCounter,timestamp,RSSI,LQI,FCS,temperature,battery" << std::endl;
 
 		int lastCharFromConsole = 0;
 		while (lastCharFromConsole != 'x')
@@ -186,23 +189,28 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	endDevicePacketCounter |= ((0x000000FF & packet[13]) << 16);
 	endDevicePacketCounter |= ((0x000000FF & packet[14]) << 24);
 
+	float batteryVoltage = 0.0;
+	if (packet[15] == 'B')
+	{
+		uint16_t voltage = 0;
+		voltage |= (0x00FF & packet[16]);
+		voltage |= ((0x00FF & packet[17]) << 8);
+
+		batteryVoltage = static_cast<float>(voltage) / 100;
+	}
+
+	float temperature = 0.0;
+	if (packet[18] == 'T')
+	{
+		int16_t temperatureData = 0;
+		temperatureData |= (0x00FF & packet[19]);
+		temperatureData |= ((0x00FF & packet[20]) << 8);
+
+		temperature = static_cast<float>(temperatureData) / 10;
+	}
+
 	std::string formattedBlob;
 	auto packetBlob = std::vector<uint8_t>(packet.begin() + 15, packet.end());
-	switch (dataBlobFormat)
-	{
-	case blobFormat::ascii:
-		formattedBlob = bufferToAscii(packetBlob);
-		break;
-	case blobFormat::hex:
-		formattedBlob = bufferToHex(packetBlob);
-		break;
-	case blobFormat::number:
-		formattedBlob = bufferToNumber(packetBlob);
-		break;
-	default:
-			throw std::exception("No BLOB format specified - programming error.");
-		break;
-	}
 
 	auto timeNow = std::time(nullptr);
 	auto timeNowTm = std::localtime(&timeNow);
@@ -212,5 +220,22 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	localTimeAsString.resize(stringLength);
 
 	outputFile << localTimeAsString << "," << linkId << "," << accessPointPacketCounter << "," << endDevicePacketCounter << ",\"" << timestampAsString
-		<< ";" << milliseconds << "\",\"" << formattedBlob << "\"," << rssi << "," << lqi << "," << (fcsOk ? "OK" : "ERROR") << std::endl;
+		<< ";" << milliseconds << "," << rssi << "," << lqi << "," << (fcsOk ? "OK" : "ERROR") << "," << batteryVoltage << "," << temperature << std::endl;
+
+	auto linkLog = s_connectedDevicesLog.find(linkId);
+	if (linkLog != s_connectedDevicesLog.end())
+	{
+		s_connectedDevicesLog.erase(linkLog);
+	}
+
+	std::ostringstream deviceLog;
+	deviceLog << "temperature: " << temperature << "C, battery voltage: " << batteryVoltage << "V.";
+	s_connectedDevicesLog.insert(std::pair<uint32_t, std::string>(linkId, deviceLog.str()));
+
+	std::cout << '\r';
+	for (uint32_t i = 1; i <= s_connectedDevicesLog.size(); i++)
+	{
+		auto linkLogPair = s_connectedDevicesLog.find(i);
+		std::cout << "Link " << linkLogPair->first << " " << linkLogPair->second << " ";
+	}
 }
