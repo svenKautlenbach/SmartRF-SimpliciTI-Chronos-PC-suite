@@ -220,7 +220,7 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 	localTimeAsString.resize(stringLength);
 
 	outputFile << localTimeAsString << "," << linkId << "," << accessPointPacketCounter << "," << endDevicePacketCounter << ",\"" << timestampAsString
-		<< ";" << milliseconds << "," << rssi << "," << lqi << "," << (fcsOk ? "OK" : "ERROR") << "," << batteryVoltage << "," << temperature << std::endl;
+		<< ";" << milliseconds << "\"," << rssi << "," << lqi << "," << (fcsOk ? "OK" : "ERROR") << "," << batteryVoltage << "," << temperature << std::endl;
 
 	auto linkLog = s_connectedDevicesLog.find(linkId);
 	if (linkLog != s_connectedDevicesLog.end())
@@ -238,4 +238,6 @@ static void writePacketToFile(const std::vector<uint8_t>& packet)
 		auto linkLogPair = s_connectedDevicesLog.find(i);
 		std::cout << "Link " << linkLogPair->first << " " << linkLogPair->second << " ";
 	}
+
+	std::cout << "           ";
 }
